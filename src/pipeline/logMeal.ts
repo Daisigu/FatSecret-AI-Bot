@@ -1,18 +1,17 @@
 import type { GeminiClient, ParsedResponse } from "../gemini/client.ts";
 import type { FatSecretClient } from "../fatsecret/client.ts";
-import { fatsecretDayInt, guessMeal } from "../utils/date.ts";
+import { fatsecretDayInt, guessMeal, type Meal } from "../utils/date.ts";
 import { logger } from "../utils/logger.ts";
 
-export interface ItemResult {
-  nameRu: string;
-  grams: number;
-  status: "logged" | "no_match" | "no_gram_serving" | "error";
-  matchedFoodName?: string;
-  errorMessage?: string;
-}
+export type ItemResult =
+  | { status: "logged"; nameRu: string; grams: number; matchedFoodName: string }
+  | { status: "no_match"; nameRu: string; grams: number }
+  | { status: "no_gram_serving"; nameRu: string; grams: number; matchedFoodName: string }
+  | { status: "error"; nameRu: string; grams: number; errorMessage: string };
 
 export interface LogMealResult {
   items: ItemResult[];
+  meal?: Meal;
   clarificationNeeded?: string;
 }
 
@@ -56,7 +55,6 @@ async function logExtractedMeal(
   fatsecret: FatSecretClient,
   timezone: string
 ): Promise<LogMealResult> {
-
   if (extracted.items.length === 0) {
     logger.info("[pipeline] no food items extracted", {
       clarificationNeeded: extracted.clarification_needed ?? null,
@@ -75,6 +73,7 @@ async function logExtractedMeal(
   );
 
   // 2. Ask Gemini to pick the best food_id among candidates for each item.
+  // Empty candidate lists are skipped inside matchBestCandidates (no extra Gemini call).
   const chosenFoodIds = await gemini.matchBestCandidates(
     extracted.items.map((item) => ({ query: item.food_query_en, grams: item.grams })),
     candidatesByItem
@@ -141,5 +140,5 @@ async function logExtractedMeal(
   }
 
   logger.info("[pipeline] done", { items: results });
-  return { items: results };
+  return { items: results, meal };
 }

@@ -12,6 +12,7 @@ if (!config.fatsecret.accessToken || !config.fatsecret.accessTokenSecret) {
 const bot = createBot();
 
 bot.start({
+  drop_pending_updates: true,
   onStart: () => logger.info("Bot started (long polling)", { models: config.gemini.models }),
 });
 

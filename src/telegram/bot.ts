@@ -1,36 +1,40 @@
-import { Bot } from "grammy";
+import { Bot, type Context } from "grammy";
 import { config } from "../config.ts";
 import { GeminiClient } from "../gemini/client.ts";
 import { FatSecretClient } from "../fatsecret/client.ts";
-import { logMealFromPhoto, logMealFromText, logMealFromVoice, type ItemResult, type LogMealResult } from "../pipeline/logMeal.ts";
+import {
+  logMealFromPhoto,
+  logMealFromText,
+  logMealFromVoice,
+  type ItemResult,
+  type LogMealResult,
+} from "../pipeline/logMeal.ts";
 import { fetchBuffer } from "../utils/http.ts";
 import { logger } from "../utils/logger.ts";
+import type { Meal } from "../utils/date.ts";
 
-const MEAL_LABELS_RU: Record<string, string> = {
+const MEAL_LABELS_RU: Record<Meal, string> = {
   breakfast: "завтрак",
   lunch: "обед",
   dinner: "ужин",
   other: "перекус",
 };
 
-function formatResults(items: ItemResult[]): string {
-  const lines = items.map((item) => {
-    switch (item.status) {
-      case "logged":
-        return `✅ ${item.nameRu} — ${item.grams} г (${item.matchedFoodName})`;
-      case "no_match":
-        return `❓ ${item.nameRu} — ${item.grams} г: не нашёл подходящий продукт в базе FatSecret`;
-      case "no_gram_serving":
-        return `⚠️ ${item.nameRu} — ${item.grams} г: нашёл "${item.matchedFoodName}", но у него нет порции в граммах`;
-      case "error":
-        return `⚠️ ${item.nameRu} — ${item.grams} г: ошибка при записи (${item.errorMessage})`;
-      default: {
-        const _exhaustive: never = item.status;
-        return _exhaustive;
-      }
+function formatItem(item: ItemResult): string {
+  switch (item.status) {
+    case "logged":
+      return `✅ ${item.nameRu} — ${item.grams} г (${item.matchedFoodName})`;
+    case "no_match":
+      return `❓ ${item.nameRu} — ${item.grams} г: не нашёл подходящий продукт в базе FatSecret`;
+    case "no_gram_serving":
+      return `⚠️ ${item.nameRu} — ${item.grams} г: нашёл "${item.matchedFoodName}", но у него нет порции в граммах`;
+    case "error":
+      return `⚠️ ${item.nameRu} — ${item.grams} г: ошибка при записи (${item.errorMessage})`;
+    default: {
+      const _exhaustive: never = item;
+      return _exhaustive;
     }
-  });
-  return lines.join("\n");
+  }
 }
 
 function clarificationReply(result: LogMealResult): string {
@@ -39,12 +43,34 @@ function clarificationReply(result: LogMealResult): string {
       ? `🤔 ${result.clarificationNeeded}`
       : "🤔 Не удалось разобрать еду в сообщении. Попробуй ещё раз, назвав продукт и вес в граммах.";
   }
-  return formatResults(result.items);
+  const lines = result.items.map(formatItem).join("\n");
+  if (!result.meal) return lines;
+  return `Записал в ${MEAL_LABELS_RU[result.meal]}:\n${lines}`;
 }
 
 async function downloadTelegramFile(botToken: string, filePath: string): Promise<Buffer> {
   const url = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
   return fetchBuffer(url);
+}
+
+async function runWithStatusMessage(
+  ctx: Context,
+  pendingText: string,
+  errorText: string,
+  work: () => Promise<LogMealResult>
+): Promise<void> {
+  const processingMsg = await ctx.reply(pendingText);
+  try {
+    const result = await work();
+    await ctx.api.editMessageText(
+      processingMsg.chat.id,
+      processingMsg.message_id,
+      clarificationReply(result)
+    );
+  } catch (err) {
+    logger.error("Failed to process meal message", err);
+    await ctx.api.editMessageText(processingMsg.chat.id, processingMsg.message_id, errorText);
+  }
 }
 
 export function createBot() {
@@ -57,6 +83,8 @@ export function createBot() {
     config.fatsecret.accessTokenSecret
   );
 
+  const inflight = new Set<number>();
+
   // Restrict the bot to a fixed set of Telegram user IDs (this is a
   // single-user diary bot; it writes to one FatSecret account).
   bot.use(async (ctx, next) => {
@@ -68,6 +96,25 @@ export function createBot() {
     await next();
   });
 
+  bot.use(async (ctx, next) => {
+    const userId = ctx.from?.id;
+    const text = ctx.message?.text;
+    if (userId == null || text?.startsWith("/")) {
+      await next();
+      return;
+    }
+    if (inflight.has(userId)) {
+      await ctx.reply("⏳ Ещё обрабатываю предыдущее сообщение...");
+      return;
+    }
+    inflight.add(userId);
+    try {
+      await next();
+    } finally {
+      inflight.delete(userId);
+    }
+  });
+
   bot.command("start", async (ctx) => {
     await ctx.reply(
       "Привет! Напиши текстом, пришли голосовое или фото того, что ты съел — например:\n" +
@@ -76,126 +123,88 @@ export function createBot() {
     );
   });
 
+  bot.command("id", async (ctx) => {
+    await ctx.reply(`Твой Telegram ID: ${ctx.from?.id ?? "неизвестен"}`);
+  });
+
   bot.on("message:voice", async (ctx) => {
-    const processingMsg = await ctx.reply("🎧 Слушаю и записываю в дневник...");
+    await runWithStatusMessage(
+      ctx,
+      "🎧 Слушаю и записываю в дневник...",
+      "❌ Что-то пошло не так при обработке голосового сообщения. Попробуй ещё раз.",
+      async () => {
+        const file = await ctx.api.getFile(ctx.message.voice.file_id);
+        if (!file.file_path) throw new Error("Telegram did not return a file_path");
 
-    try {
-      const file = await ctx.api.getFile(ctx.message.voice.file_id);
-      if (!file.file_path) throw new Error("Telegram did not return a file_path");
+        logger.info("[pipeline] voice received", {
+          userId: ctx.from?.id,
+          durationSec: ctx.message.voice.duration,
+          fileId: ctx.message.voice.file_id,
+          filePath: file.file_path,
+        });
 
-      logger.info("[pipeline] voice received", {
-        userId: ctx.from?.id,
-        durationSec: ctx.message.voice.duration,
-        fileId: ctx.message.voice.file_id,
-        filePath: file.file_path,
-      });
-
-      const audio = await downloadTelegramFile(config.telegram.botToken, file.file_path);
-      logger.info("[pipeline] voice downloaded", { bytes: audio.length });
-      const result = await logMealFromVoice(audio, gemini, fatsecret, config.timezone);
-      await ctx.api.editMessageText(ctx.chat.id, processingMsg.message_id, clarificationReply(result));
-    } catch (err) {
-      logger.error("Failed to process voice message", err);
-      await ctx.api.editMessageText(
-        ctx.chat.id,
-        processingMsg.message_id,
-        "❌ Что-то пошло не так при обработке голосового сообщения. Попробуй ещё раз."
-      );
-    }
+        const audio = await downloadTelegramFile(config.telegram.botToken, file.file_path);
+        logger.info("[pipeline] voice downloaded", { bytes: audio.length });
+        return logMealFromVoice(audio, gemini, fatsecret, config.timezone);
+      }
+    );
   });
 
   bot.on("message:text", async (ctx) => {
     const text = ctx.message.text.trim();
     if (!text || text.startsWith("/")) return;
 
-    const processingMsg = await ctx.reply("📝 Читаю и записываю в дневник...");
-
-    try {
-      logger.info("[pipeline] text received", {
-        userId: ctx.from?.id,
-        text,
-      });
-      const result = await logMealFromText(text, gemini, fatsecret, config.timezone);
-      await ctx.api.editMessageText(ctx.chat.id, processingMsg.message_id, clarificationReply(result));
-    } catch (err) {
-      logger.error("Failed to process text message", err);
-      await ctx.api.editMessageText(
-        ctx.chat.id,
-        processingMsg.message_id,
-        "❌ Что-то пошло не так при обработке текстового сообщения. Попробуй ещё раз."
-      );
-    }
+    await runWithStatusMessage(
+      ctx,
+      "📝 Читаю и записываю в дневник...",
+      "❌ Что-то пошло не так при обработке текстового сообщения. Попробуй ещё раз.",
+      async () => {
+        logger.info("[pipeline] text received", {
+          userId: ctx.from?.id,
+          text,
+        });
+        return logMealFromText(text, gemini, fatsecret, config.timezone);
+      }
+    );
   });
 
-  async function processMealPhoto(args: {
-    userId: number | undefined;
-    fileId: string;
-    mimeType: string;
-    caption?: string;
-    chatId: number;
-  }): Promise<void> {
-    const processingMsg = await bot.api.sendMessage(
-      args.chatId,
-      "📷 Смотрю фото и записываю в дневник..."
+  async function processMealPhoto(ctx: Context, fileId: string, mimeType: string): Promise<void> {
+    await runWithStatusMessage(
+      ctx,
+      "📷 Смотрю фото и записываю в дневник...",
+      "❌ Что-то пошло не так при обработке фото. Попробуй ещё раз.",
+      async () => {
+        const file = await ctx.api.getFile(fileId);
+        if (!file.file_path) throw new Error("Telegram did not return a file_path");
+
+        const caption = ctx.message?.caption?.trim();
+        logger.info("[pipeline] photo received", {
+          userId: ctx.from?.id,
+          fileId,
+          filePath: file.file_path,
+          mimeType,
+          caption: caption ?? null,
+        });
+
+        const image = await downloadTelegramFile(config.telegram.botToken, file.file_path);
+        logger.info("[pipeline] photo downloaded", { bytes: image.length });
+        return logMealFromPhoto(image, mimeType, gemini, fatsecret, config.timezone, caption);
+      }
     );
-
-    try {
-      const file = await bot.api.getFile(args.fileId);
-      if (!file.file_path) throw new Error("Telegram did not return a file_path");
-
-      logger.info("[pipeline] photo received", {
-        userId: args.userId,
-        fileId: args.fileId,
-        filePath: file.file_path,
-        mimeType: args.mimeType,
-        caption: args.caption ?? null,
-      });
-
-      const image = await downloadTelegramFile(config.telegram.botToken, file.file_path);
-      logger.info("[pipeline] photo downloaded", { bytes: image.length });
-      const result = await logMealFromPhoto(
-        image,
-        args.mimeType,
-        gemini,
-        fatsecret,
-        config.timezone,
-        args.caption
-      );
-      await bot.api.editMessageText(args.chatId, processingMsg.message_id, clarificationReply(result));
-    } catch (err) {
-      logger.error("Failed to process photo message", err);
-      await bot.api.editMessageText(
-        args.chatId,
-        processingMsg.message_id,
-        "❌ Что-то пошло не так при обработке фото. Попробуй ещё раз."
-      );
-    }
   }
 
   bot.on("message:photo", async (ctx) => {
     const photos = ctx.message.photo;
     const largest = photos[photos.length - 1];
     if (!largest) return;
-    await processMealPhoto({
-      userId: ctx.from?.id,
-      fileId: largest.file_id,
-      mimeType: "image/jpeg",
-      caption: ctx.message.caption?.trim(),
-      chatId: ctx.chat.id,
-    });
+    await processMealPhoto(ctx, largest.file_id, "image/jpeg");
   });
 
   bot.on("message:document", async (ctx) => {
     const doc = ctx.message.document;
     const mimeType = doc.mime_type ?? "";
     if (!mimeType.startsWith("image/")) return;
-    await processMealPhoto({
-      userId: ctx.from?.id,
-      fileId: doc.file_id,
-      mimeType,
-      caption: ctx.message.caption?.trim(),
-      chatId: ctx.chat.id,
-    });
+    await processMealPhoto(ctx, doc.file_id, mimeType);
   });
 
   bot.catch((err) => {

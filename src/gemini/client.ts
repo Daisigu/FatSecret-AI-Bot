@@ -32,8 +32,25 @@ const ParsedResponseSchema = z.object({
   clarification_needed: z.string().nullable().optional(),
 });
 
+const MatchSelectionSchema = z.object({
+  index: z.number().int(),
+  food_id: z.string().nullable(),
+});
+
+const MatchResponseSchema = z.object({
+  selections: z.array(MatchSelectionSchema),
+});
+
 export type ParsedFoodItem = z.infer<typeof ParsedItemSchema>;
 export type ParsedResponse = z.infer<typeof ParsedResponseSchema>;
+
+type ExtractSource = "voice" | "text" | "photo";
+
+const EXTRACT_LABELS: Record<ExtractSource, string> = {
+  voice: "extractFoodItemsFromVoice",
+  text: "extractFoodItemsFromText",
+  photo: "extractFoodItemsFromPhoto",
+};
 
 const EXTRACT_RESPONSE_FORMAT = jsonTextFormat({
   type: "object",
@@ -69,6 +86,24 @@ const EXTRACT_RESPONSE_FORMAT = jsonTextFormat({
   required: ["items"],
 });
 
+const MATCH_RESPONSE_FORMAT = jsonTextFormat({
+  type: "object",
+  properties: {
+    selections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          index: { type: "integer" },
+          food_id: { type: ["string", "null"] },
+        },
+        required: ["index", "food_id"],
+      },
+    },
+  },
+  required: ["selections"],
+});
+
 const EXTRACT_PROMPT = `Ты — парсер сообщений для трекера питания.
 Пользователь на русском языке пишет, говорит голосом или присылает фото того, что съел,
 обычно с указанием веса в граммах, например: "Я съел 120 грам нектарина и 50 грам персиков".
@@ -86,6 +121,14 @@ const EXTRACT_PROMPT = `Ты — парсер сообщений для трек
 
 Если в сообщении нет еды или количество совсем не разобрать — верни пустой items и заполни
 clarification_needed кратким объяснением на русском.`;
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw || "{}");
+  } catch {
+    throw new Error("Gemini returned invalid JSON");
+  }
+}
 
 export class GeminiClient {
   private ai: GoogleGenAI;
@@ -129,8 +172,8 @@ export class GeminiClient {
       : new Error(`Gemini ${label} failed on all models`);
   }
 
-  private parseExtractResponse(raw: string, source: "voice" | "text" | "photo"): ParsedResponse {
-    const parsed = ParsedResponseSchema.safeParse(JSON.parse(raw || "{}"));
+  private parseExtractResponse(raw: string, source: ExtractSource): ParsedResponse {
+    const parsed = ParsedResponseSchema.safeParse(parseJson(raw));
     if (!parsed.success) {
       logger.error("[pipeline] Gemini extract failed validation", { source, raw, issues: parsed.error.issues });
       throw new Error("Gemini returned an unexpected shape for food extraction");
@@ -139,40 +182,34 @@ export class GeminiClient {
     return parsed.data;
   }
 
-  /** Sends a Telegram voice note (OGG/Opus) straight to Gemini: STT + parsing in one call. */
-  async extractFoodItemsFromVoice(audio: Buffer): Promise<ParsedResponse> {
-    return this.withModelFallback("extractFoodItemsFromVoice", async (model) => {
+  private async extractFoodItems(
+    source: ExtractSource,
+    parts: Interactions.Content[]
+  ): Promise<ParsedResponse> {
+    return this.withModelFallback(EXTRACT_LABELS[source], async (model) => {
       const interaction = await this.ai.interactions.create({
         model,
-        input: [
-          { type: "text", text: EXTRACT_PROMPT },
-          {
-            type: "audio",
-            data: audio.toString("base64"),
-            mime_type: "audio/ogg",
-          },
-        ],
+        input: [{ type: "text", text: EXTRACT_PROMPT }, ...parts],
         response_format: EXTRACT_RESPONSE_FORMAT,
       });
-
-      return this.parseExtractResponse(getOutputText(interaction), "voice");
+      return this.parseExtractResponse(getOutputText(interaction), source);
     });
+  }
+
+  /** Sends a Telegram voice note (OGG/Opus) straight to Gemini: STT + parsing in one call. */
+  async extractFoodItemsFromVoice(audio: Buffer): Promise<ParsedResponse> {
+    return this.extractFoodItems("voice", [
+      {
+        type: "audio",
+        data: audio.toString("base64"),
+        mime_type: "audio/ogg",
+      },
+    ]);
   }
 
   /** Parses a typed meal description the same way as a voice note. */
   async extractFoodItemsFromText(text: string): Promise<ParsedResponse> {
-    return this.withModelFallback("extractFoodItemsFromText", async (model) => {
-      const interaction = await this.ai.interactions.create({
-        model,
-        input: [
-          { type: "text", text: EXTRACT_PROMPT },
-          { type: "text", text },
-        ],
-        response_format: EXTRACT_RESPONSE_FORMAT,
-      });
-
-      return this.parseExtractResponse(getOutputText(interaction), "text");
-    });
+    return this.extractFoodItems("text", [{ type: "text", text }]);
   }
 
   /** Identifies foods on a meal photo; caption grams/brands override visual guesses. */
@@ -181,28 +218,18 @@ export class GeminiClient {
     mimeType: string,
     caption?: string
   ): Promise<ParsedResponse> {
-    return this.withModelFallback("extractFoodItemsFromPhoto", async (model) => {
-      const input: Interactions.Content[] = [
-        { type: "text", text: EXTRACT_PROMPT },
-        {
-          type: "image",
-          data: image.toString("base64"),
-          mime_type: mimeType,
-        },
-      ];
-      const trimmedCaption = caption?.trim();
-      if (trimmedCaption) {
-        input.push({ type: "text", text: trimmedCaption });
-      }
-
-      const interaction = await this.ai.interactions.create({
-        model,
-        input,
-        response_format: EXTRACT_RESPONSE_FORMAT,
-      });
-
-      return this.parseExtractResponse(getOutputText(interaction), "photo");
-    });
+    const parts: Interactions.Content[] = [
+      {
+        type: "image",
+        data: image.toString("base64"),
+        mime_type: mimeType,
+      },
+    ];
+    const trimmedCaption = caption?.trim();
+    if (trimmedCaption) {
+      parts.push({ type: "text", text: trimmedCaption });
+    }
+    return this.extractFoodItems("photo", parts);
   }
 
   /**
@@ -211,23 +238,41 @@ export class GeminiClient {
    * (plain fruit/vegetable/dish, not a random branded product, matching
    * cooking state e.g. "boiled" vs "raw" when mentioned).
    * Returns one food_id (or null if nothing is a good match) per item, in order.
+   * Items with an empty candidate list are null without a Gemini call.
    */
   async matchBestCandidates(
     items: { query: string; grams: number }[],
     candidatesByItem: FoodSearchItem[][]
   ): Promise<(string | null)[]> {
-    const payload = items.map((item, i) => ({
-      index: i,
-      query: item.query,
-      grams: item.grams,
-      candidates: candidatesByItem[i].map((c) => ({
-        food_id: c.food_id,
-        food_name: c.food_name,
-        food_type: c.food_type,
-        brand_name: c.brand_name ?? null,
-        food_description: c.food_description,
-      })),
-    }));
+    const result: (string | null)[] = new Array(items.length).fill(null);
+    const matchIndexes: number[] = [];
+    for (let i = 0; i < items.length; i++) {
+      if ((candidatesByItem[i]?.length ?? 0) > 0) {
+        matchIndexes.push(i);
+      }
+    }
+
+    if (matchIndexes.length === 0) {
+      logger.info("[pipeline] Gemini matchBestCandidates skipped", { reason: "no candidates" });
+      return result;
+    }
+
+    const payload = matchIndexes.map((i) => {
+      const item = items[i];
+      const candidates = candidatesByItem[i] ?? [];
+      return {
+        index: i,
+        query: item.query,
+        grams: item.grams,
+        candidates: candidates.map((c) => ({
+          food_id: c.food_id,
+          food_name: c.food_name,
+          food_type: c.food_type,
+          brand_name: c.brand_name ?? null,
+          food_description: c.food_description,
+        })),
+      };
+    });
 
     const prompt = `Для каждого элемента ниже выбери food_id из его списка candidates, который лучше всего
 соответствует запросу (query). Предпочитай food_type "Generic" (не брендовые продукты), если пользователь
@@ -235,44 +280,29 @@ export class GeminiClient {
 
 ${JSON.stringify(payload, null, 2)}`;
 
-    const responseFormat = jsonTextFormat({
-      type: "object",
-      properties: {
-        selections: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              index: { type: "integer" },
-              food_id: { type: ["string", "null"] },
-            },
-            required: ["index", "food_id"],
-          },
-        },
-      },
-      required: ["selections"],
-    });
-
     const interaction = await this.withModelFallback("matchBestCandidates", (model) =>
       this.ai.interactions.create({
         model,
         input: [{ type: "text", text: prompt }],
-        response_format: responseFormat,
+        response_format: MATCH_RESPONSE_FORMAT,
       })
     );
 
-    const raw = JSON.parse(getOutputText(interaction) || "{}") as {
-      selections?: { index: number; food_id: string | null }[];
-    };
+    const parsed = MatchResponseSchema.safeParse(parseJson(getOutputText(interaction)));
+    if (!parsed.success) {
+      logger.error("[pipeline] Gemini matchBestCandidates failed validation", {
+        issues: parsed.error.issues,
+      });
+      throw new Error("Gemini returned an unexpected shape for candidate matching");
+    }
 
-    const result: (string | null)[] = new Array(items.length).fill(null);
-    for (const sel of raw.selections ?? []) {
+    for (const sel of parsed.data.selections) {
       if (sel.index >= 0 && sel.index < result.length) {
         result[sel.index] = sel.food_id;
       }
     }
     logger.info("[pipeline] Gemini matchBestCandidates", {
-      selections: raw.selections ?? [],
+      selections: parsed.data.selections,
       chosenFoodIds: result,
     });
     return result;

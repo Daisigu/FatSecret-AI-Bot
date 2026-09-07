@@ -10,8 +10,16 @@ export class HttpError extends Error {
   }
 }
 
+const FETCH_TIMEOUT_MS = 30_000;
+
+function withTimeout(init?: RequestInit): RequestInit {
+  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  return { ...init, signal };
+}
+
 async function readOk(url: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
+  const res = await fetch(url, withTimeout(init));
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new HttpError(url, res.status, body);

@@ -35,11 +35,9 @@ function geminiModelPool(): string[] {
 export const config = {
   telegram: {
     botToken: required("TELEGRAM_BOT_TOKEN"),
-    allowedUserIds: (process.env.TELEGRAM_ALLOWED_USER_IDS ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map(Number),
+    allowedUserIds: csvEnv("TELEGRAM_ALLOWED_USER_IDS")
+      .map(Number)
+      .filter(Number.isFinite),
   },
   gemini: {
     apiKey: required("GEMINI_API_KEY"),
