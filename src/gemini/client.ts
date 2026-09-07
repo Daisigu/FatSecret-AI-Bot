@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import type { Interactions } from "@google/genai";
-import { z } from "zod";
+import * as z from "zod";
 import type { FoodSearchItem } from "../fatsecret/types.js";
 import { logger } from "../utils/logger.js";
 

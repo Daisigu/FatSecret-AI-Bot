@@ -1,9 +1,9 @@
 import { Bot } from "grammy";
-import axios from "axios";
 import { config } from "../config.js";
 import { GeminiClient } from "../gemini/client.js";
 import { FatSecretClient } from "../fatsecret/client.js";
 import { logMealFromPhoto, logMealFromText, logMealFromVoice, type ItemResult, type LogMealResult } from "../pipeline/logMeal.js";
+import { fetchBuffer } from "../utils/http.js";
 import { logger } from "../utils/logger.js";
 
 const MEAL_LABELS_RU: Record<string, string> = {
@@ -44,8 +44,7 @@ function clarificationReply(result: LogMealResult): string {
 
 async function downloadTelegramFile(botToken: string, filePath: string): Promise<Buffer> {
   const url = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
-  const res = await axios.get<ArrayBuffer>(url, { responseType: "arraybuffer" });
-  return Buffer.from(res.data);
+  return fetchBuffer(url);
 }
 
 export function createBot() {

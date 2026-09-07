@@ -14,10 +14,9 @@
  * The resulting token does not expire (FatSecret access tokens are
  * long-lived) unless you revoke it from your FatSecret account settings.
  */
-import "dotenv/config";
-import axios from "axios";
 import readline from "node:readline/promises";
 import { createOAuth1, buildSignedGetUrl, buildSignedPostBody } from "./fatsecret/oauth1.js";
+import { fetchText, HttpError } from "./utils/http.js";
 
 const AUTH_HOST = "https://authentication.fatsecret.com";
 
@@ -46,13 +45,15 @@ async function main() {
     `${AUTH_HOST}/oauth/request_token`,
     { oauth_callback: "oob" }
   );
-  const requestTokenRes = await axios.post(`${AUTH_HOST}/oauth/request_token`, requestTokenBody, {
+  const requestTokenRaw = await fetchText(`${AUTH_HOST}/oauth/request_token`, {
+    method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: requestTokenBody,
   });
-  const requestToken = parseFormBody(requestTokenRes.data);
+  const requestToken = parseFormBody(requestTokenRaw);
 
   if (requestToken.oauth_callback_confirmed !== "true") {
-    console.error("Unexpected response from request_token:", requestTokenRes.data);
+    console.error("Unexpected response from request_token:", requestTokenRaw);
     process.exit(1);
   }
 
@@ -78,11 +79,11 @@ async function main() {
     { oauth_verifier: pin },
     { key: requestToken.oauth_token, secret: requestToken.oauth_token_secret }
   );
-  const accessTokenRes = await axios.get(accessTokenUrl);
-  const accessToken = parseFormBody(accessTokenRes.data);
+  const accessTokenRaw = await fetchText(accessTokenUrl);
+  const accessToken = parseFormBody(accessTokenRaw);
 
   if (!accessToken.oauth_token || !accessToken.oauth_token_secret) {
-    console.error("Unexpected response from access_token:", accessTokenRes.data);
+    console.error("Unexpected response from access_token:", accessTokenRaw);
     process.exit(1);
   }
 
@@ -92,6 +93,10 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("OAuth setup failed:", err.response?.data ?? err.message);
+  if (err instanceof HttpError) {
+    console.error("OAuth setup failed:", err.body || err.message);
+  } else {
+    console.error("OAuth setup failed:", err instanceof Error ? err.message : err);
+  }
   process.exit(1);
 });

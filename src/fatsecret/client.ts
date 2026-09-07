@@ -1,4 +1,3 @@
-import axios from "axios";
 import { createOAuth1, buildSignedApiBody, type Token } from "./oauth1.js";
 import type {
   FoodEntryCreateResponse,
@@ -8,6 +7,7 @@ import type {
   FoodServing,
 } from "./types.js";
 import type { Meal } from "../utils/date.js";
+import { fetchJson } from "../utils/http.js";
 import { logger } from "../utils/logger.js";
 
 const API_URL = "https://platform.fatsecret.com/rest/server.api";
@@ -40,15 +40,15 @@ export class FatSecretClient {
       { format: "json", ...params },
       this.token
     );
-    const res = await axios.post(API_URL, body, {
+    const data = await fetchJson<T & { error?: { code: string; message: string } }>(API_URL, {
+      method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
     });
-    if (res.data?.error) {
-      throw new Error(
-        `FatSecret API error ${res.data.error.code}: ${res.data.error.message}`
-      );
+    if (data.error) {
+      throw new Error(`FatSecret API error ${data.error.code}: ${data.error.message}`);
     }
-    return res.data as T;
+    return data;
   }
 
   /** foods.search.v3 - text search over the food database. */

@@ -5,25 +5,23 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file=.env src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "fatsecret:auth": "tsx src/fatsecret-oauth-setup.ts"
+    "start": "node --env-file=.env dist/index.js",
+    "fatsecret:auth": "tsx --env-file=.env src/fatsecret-oauth-setup.ts"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",
-    "axios": "^1.7.9",
-    "dotenv": "^16.4.7",
-    "grammy": "^1.31.0",
+    "grammy": "^1.46.0",
     "oauth-1.0a": "^2.2.6",
-    "zod": "^3.24.1"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/node": "^22.10.5",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "@types/node": "^26.5.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }
