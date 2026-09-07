@@ -1,7 +1,7 @@
 {
   "name": "fatsecret-voice-bot",
   "version": "1.0.0",
-  "description": "Telegram bot: voice message -> Gemini (STT + parsing) -> FatSecret food diary",
+  "description": "Telegram bot for FatSecret: voice, text or photo of food, parsed by Gemini, logged to the food diary",
   "type": "module",
   "private": true,
   "scripts": {
