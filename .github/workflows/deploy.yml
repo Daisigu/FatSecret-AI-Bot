@@ -21,17 +21,9 @@ jobs:
             export NVM_DIR=/root/.nvm
             . "$NVM_DIR/nvm.sh"
 
-            APP_DIR=/opt/fatsecret-voice-bot
-            if [[ ! -d "$APP_DIR/.git" ]]; then
-              git clone --branch main https://github.com/Daisigu/FatSecret-AI-Bot.git "$APP_DIR"
-            fi
-
+            APP_DIR='${{ secrets.DEPLOY_PATH }}'
             cd "$APP_DIR"
             git fetch origin main
             git reset --hard origin/main
             npm ci --omit=dev
-
-            install -m 644 deploy/fatsecret-voice-bot.service /etc/systemd/system/fatsecret-voice-bot.service
-            systemctl daemon-reload
-            systemctl enable --now fatsecret-voice-bot.service
             systemctl restart fatsecret-voice-bot.service
