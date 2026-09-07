@@ -39,7 +39,7 @@ STT-сервиса не нужно, Gemini понимает аудио напр�
 
 ## Установка
 
-Нужен Node.js **22+** (рекомендуется 24 LTS). Переменные из `.env` подхватываются через `--env-file` (dotenv не используется).
+Нужен Node.js **24.12+** (type stripping стабилен; у тебя достаточно 24.17, Node 26 Current тоже подходит). Переменные из `.env` подхватываются через `--env-file`. TypeScript запускается нативно (`node file.ts`), без tsx.
 
 ```bash
 npm install
@@ -81,8 +81,9 @@ npm run fatsecret:auth
 ### Запуск
 
 ```bash
-npm run dev      # разработка: tsx watch --env-file=.env
-npm run build && npm start   # прод: tsc, затем node --env-file=.env
+npm run dev      # разработка: node --watch --env-file=.env src/index.ts
+npm start        # прод: тот же runtime, без сборки
+npm run typecheck
 ```
 
 ## Ограничения и что можно улучшить

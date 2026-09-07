@@ -1,14 +1,14 @@
-import { createOAuth1, buildSignedApiBody, type Token } from "./oauth1.js";
+import { createOAuth1, buildSignedApiBody, type Token } from "./oauth1.ts";
 import type {
   FoodEntryCreateResponse,
   FoodGetResponse,
   FoodSearchItem,
   FoodSearchResponse,
   FoodServing,
-} from "./types.js";
-import type { Meal } from "../utils/date.js";
-import { fetchJson } from "../utils/http.js";
-import { logger } from "../utils/logger.js";
+} from "./types.ts";
+import type { Meal } from "../utils/date.ts";
+import { fetchJson } from "../utils/http.ts";
+import { logger } from "../utils/logger.ts";
 
 const API_URL = "https://platform.fatsecret.com/rest/server.api";
 

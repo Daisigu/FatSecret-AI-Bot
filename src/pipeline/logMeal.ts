@@ -1,7 +1,7 @@
-import type { GeminiClient, ParsedResponse } from "../gemini/client.js";
-import type { FatSecretClient } from "../fatsecret/client.js";
-import { fatsecretDayInt, guessMeal } from "../utils/date.js";
-import { logger } from "../utils/logger.js";
+import type { GeminiClient, ParsedResponse } from "../gemini/client.ts";
+import type { FatSecretClient } from "../fatsecret/client.ts";
+import { fatsecretDayInt, guessMeal } from "../utils/date.ts";
+import { logger } from "../utils/logger.ts";
 
 export interface ItemResult {
   nameRu: string;

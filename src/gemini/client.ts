@@ -1,8 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import type { Interactions } from "@google/genai";
 import * as z from "zod";
-import type { FoodSearchItem } from "../fatsecret/types.js";
-import { logger } from "../utils/logger.js";
+import type { FoodSearchItem } from "../fatsecret/types.ts";
+import { logger } from "../utils/logger.ts";
 
 function getOutputText(interaction: Interactions.Interaction): string {
   return interaction.output_text ?? "";

@@ -1,10 +1,10 @@
 import { Bot } from "grammy";
-import { config } from "../config.js";
-import { GeminiClient } from "../gemini/client.js";
-import { FatSecretClient } from "../fatsecret/client.js";
-import { logMealFromPhoto, logMealFromText, logMealFromVoice, type ItemResult, type LogMealResult } from "../pipeline/logMeal.js";
-import { fetchBuffer } from "../utils/http.js";
-import { logger } from "../utils/logger.js";
+import { config } from "../config.ts";
+import { GeminiClient } from "../gemini/client.ts";
+import { FatSecretClient } from "../fatsecret/client.ts";
+import { logMealFromPhoto, logMealFromText, logMealFromVoice, type ItemResult, type LogMealResult } from "../pipeline/logMeal.ts";
+import { fetchBuffer } from "../utils/http.ts";
+import { logger } from "../utils/logger.ts";
 
 const MEAL_LABELS_RU: Record<string, string> = {
   breakfast: "завтрак",

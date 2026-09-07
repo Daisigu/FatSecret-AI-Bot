@@ -5,10 +5,11 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "tsx watch --env-file=.env src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node --env-file=.env dist/index.js",
-    "fatsecret:auth": "tsx --env-file=.env src/fatsecret-oauth-setup.ts"
+    "dev": "node --watch --env-file=.env src/index.ts",
+    "start": "node --env-file=.env src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "fatsecret:auth": "node --env-file=.env src/fatsecret-oauth-setup.ts"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",
@@ -18,10 +19,9 @@
   },
   "devDependencies": {
     "@types/node": "^26.5.0",
-    "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24.12"
   }
 }

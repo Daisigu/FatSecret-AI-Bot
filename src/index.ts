@@ -1,6 +1,6 @@
-import { config } from "./config.js";
-import { createBot } from "./telegram/bot.js";
-import { logger } from "./utils/logger.js";
+import { config } from "./config.ts";
+import { createBot } from "./telegram/bot.ts";
+import { logger } from "./utils/logger.ts";
 
 if (!config.fatsecret.accessToken || !config.fatsecret.accessTokenSecret) {
   logger.warn(

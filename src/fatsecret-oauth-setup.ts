@@ -15,8 +15,8 @@
  * long-lived) unless you revoke it from your FatSecret account settings.
  */
 import readline from "node:readline/promises";
-import { createOAuth1, buildSignedGetUrl, buildSignedPostBody } from "./fatsecret/oauth1.js";
-import { fetchText, HttpError } from "./utils/http.js";
+import { createOAuth1, buildSignedGetUrl, buildSignedPostBody } from "./fatsecret/oauth1.ts";
+import { fetchText, HttpError } from "./utils/http.ts";
 
 const AUTH_HOST = "https://authentication.fatsecret.com";
 
