@@ -15,7 +15,7 @@ export interface LogMealResult {
   clarificationNeeded?: string;
 }
 
-const SEARCH_CANDIDATES = 5;
+const SEARCH_CANDIDATES = 15;
 
 export async function logMealFromVoice(
   audio: Buffer,
@@ -75,7 +75,7 @@ async function logExtractedMeal(
   // 2. Ask Gemini to pick the best food_id among candidates for each item.
   // Empty candidate lists are skipped inside matchBestCandidates (no extra Gemini call).
   const chosenFoodIds = await gemini.matchBestCandidates(
-    extracted.items.map((item) => ({ query: item.food_query_en, grams: item.grams })),
+    extracted.items.map((item) => ({ query: item.food_query_en, nameRu: item.food_name_ru, grams: item.grams })),
     candidatesByItem
   );
 
