@@ -63,7 +63,7 @@ const EXTRACT_RESPONSE_FORMAT = jsonTextFormat({
           food_query_en: {
             type: "string",
             description:
-              "Short, generic English search term for a nutrition database, e.g. 'nectarine', 'boiled egg', 'white rice'.",
+              "Short, generic English search term for a nutrition database, keeping key modifiers (cooking method, with milk/water), e.g. 'boiled egg', 'semolina porridge with milk'.",
           },
           food_name_ru: {
             type: "string",
@@ -110,7 +110,9 @@ const EXTRACT_PROMPT = `Ты — парсер сообщений для трек
 
 Извлеки из сообщения (текст, аудио или фото) каждый отдельный продукт питания. Для каждого верни:
 - food_query_en: короткое, обобщённое название продукта на английском для поиска в базе данных нутриентов
-  (например "nectarine", "peach", "boiled egg", "white rice", "chicken breast"). Не включай бренды,
+  (например "nectarine", "peach", "boiled egg", "white rice", "chicken breast"). Сохраняй ключевые
+  уточнения, влияющие на калорийность: способ приготовления и основу/добавки (например
+  "semolina porridge with milk", "fried potatoes", "buckwheat boiled in water"). Не включай бренды,
   если пользователь их не называл и на упаковке бренд не виден.
 - food_name_ru: как продукт назвал сам пользователь (по-русски). Если это фото без подписи —
   короткое русское название того, что видно (блюдо или продукт).
@@ -241,7 +243,7 @@ export class GeminiClient {
    * Items with an empty candidate list are null without a Gemini call.
    */
   async matchBestCandidates(
-    items: { query: string; grams: number }[],
+    items: { query: string; nameRu: string; grams: number }[],
     candidatesByItem: FoodSearchItem[][]
   ): Promise<(string | null)[]> {
     const result: (string | null)[] = new Array(items.length).fill(null);
@@ -263,6 +265,7 @@ export class GeminiClient {
       return {
         index: i,
         query: item.query,
+        name_ru: item.nameRu,
         grams: item.grams,
         candidates: candidates.map((c) => ({
           food_id: c.food_id,
@@ -275,8 +278,12 @@ export class GeminiClient {
     });
 
     const prompt = `Для каждого элемента ниже выбери food_id из его списка candidates, который лучше всего
-соответствует запросу (query). Предпочитай food_type "Generic" (не брендовые продукты), если пользователь
-не упоминал конкретный бренд. Если ни один кандидат не подходит - верни null.
+соответствует тому, что съел пользователь. Главный ориентир - name_ru (как продукт назвал пользователь),
+query - его английский поисковый запрос. Учитывай способ приготовления и основу блюда (на молоке / на воде,
+жареное / варёное, сырое / готовое) и сверяй food_description (КБЖУ на порцию или 100 г) с типичной
+калорийностью такого блюда: например, каша на молоке заметно калорийнее каши на воде. Предпочитай
+food_type "Generic" (не брендовые продукты), если пользователь не упоминал конкретный бренд.
+Если ни один кандидат не подходит - верни null.
 
 ${JSON.stringify(payload, null, 2)}`;
 
